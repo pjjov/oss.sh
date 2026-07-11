@@ -224,3 +224,40 @@ cmd_commit_status() {
         _print_commit_status_for "$repo" "$(project_label "$(basename "$repo")")"
     fi
 }
+
+# ----------------------------------------------------------------------------
+# Command: tag status / tag update
+# ----------------------------------------------------------------------------
+
+_print_tag_status_for() {
+    local repo="$1" label="$2"
+    local tag commits age
+    tag="$(git_latest_tag "$repo")"
+    if [[ -z "$tag" ]]; then
+        printf '  %s  %sno tags yet%s\n' "$label" "$C_YELLOW" "$C_RESET"
+        return
+    fi
+    commits="$(git_commits_since_tag "$repo" "$tag")"
+    age="$(git_tag_age "$repo" "$tag")"
+    printf '  %s  latest %s%s%s, %s commit(s) since, %s\n' \
+        "$label" "$C_CYAN" "$tag" "$C_RESET" "$commits" "$age"
+}
+
+cmd_tag_status() {
+    local ws
+    ws="$(resolve_workspace)" || exit 1
+
+    if in_workspace_root "$ws"; then
+        heading "Tag status for all projects in $ws"
+        local repo
+        while IFS= read -r repo; do
+            [[ -z "$repo" ]] && continue
+            _print_tag_status_for "$repo" "$(project_label "$(basename "$repo")")"
+        done < <(list_projects "$ws")
+    else
+        local repo
+        repo="$(git_root_from_cwd)" || die "not inside a git repository"
+        heading "Tag status for $(basename "$repo")"
+        _print_tag_status_for "$repo" "$(project_label "$(basename "$repo")")"
+    fi
+}
