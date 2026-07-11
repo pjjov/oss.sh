@@ -386,3 +386,41 @@ EOF
 
     log_success "wrote $wrap_file"
 }
+
+# Locate the wrap file for name/tag inside the workspace .wraps dir
+_wrap_find_file() {
+    local ws="$1" name="$2" tag="$3"
+    local f
+    f="$(wraps_dir "$ws")/${name}-${tag}.wrap"
+    [[ -f "$f" ]] || return 1
+    printf '%s' "$f"
+}
+
+cmd_wrap_update() {
+    local name="${1:-}" tag="${2:-}"
+    [[ -n "$name" && -n "$tag" ]] || die "usage: $SCRIPT_NAME wrap update <name> <tag>"
+    is_semver "$tag" || die "tag must look like v1, v1.0 or v1.0.0 (got: $tag)"
+
+    local ws
+    ws="$(resolve_workspace)" || exit 1
+
+    local src
+    src="$(_wrap_find_file "$ws" "$name" "$tag")" || \
+        die "no wrap file for ${name} @ ${tag} in $(wraps_dir "$ws"). Run 'wrap gen' first."
+
+    local repo
+    repo="$(git_root_from_cwd)" || die "not inside a git repository"
+
+    mkdir -p "$repo/subprojects"
+    local dest="$repo/subprojects/${name}.wrap"
+    cp "$src" "$dest"
+    log_info "copied $(basename "$src") -> subprojects/${name}.wrap"
+
+    git -C "$repo" add "subprojects/${name}.wrap" || die "git add failed"
+    if git -C "$repo" diff --cached --quiet; then
+        log_warn "no changes to commit (wrap file already up to date)"
+        return 0
+    fi
+    git -C "$repo" commit -m "build: update ${name} to ${tag}" || die "git commit failed"
+    log_success "committed update of ${name} to ${tag}"
+}
