@@ -136,3 +136,55 @@ list_projects() {
         printf '%s\n' "${d%/}"
     done
 }
+
+# ----------------------------------------------------------------------------
+# Git helpers (all operate on an explicit repo path so callers can loop)
+# ----------------------------------------------------------------------------
+
+git_root_from_cwd() {
+    git rev-parse --show-toplevel 2>/dev/null
+}
+
+git_current_branch() {
+    local repo="$1"
+    git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null
+}
+
+# Number of commits on HEAD not yet on its upstream ("commits since last push")
+git_commits_ahead() {
+    local repo="$1"
+    local upstream
+    upstream="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || {
+        printf 'no-upstream'
+        return
+    }
+    git -C "$repo" rev-list --count '@{u}..HEAD' 2>/dev/null
+}
+
+git_latest_tag() {
+    local repo="$1"
+    git -C "$repo" describe --tags --abbrev=0 2>/dev/null
+}
+
+git_commits_since_tag() {
+    local repo="$1" tag="$2"
+    git -C "$repo" rev-list --count "${tag}..HEAD" 2>/dev/null
+}
+
+git_tag_age() {
+    local repo="$1" tag="$2"
+    git -C "$repo" log -1 --format=%ar "$tag" -- 2>/dev/null
+}
+
+# ----------------------------------------------------------------------------
+# Version / semver helpers ('v1', 'v1.0', 'v1.0.0')
+# ----------------------------------------------------------------------------
+
+is_semver() {
+    [[ "$1" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]]
+}
+
+strip_v_prefix() {
+    local v="$1"
+    printf '%s' "${v#v}"
+}
