@@ -505,3 +505,149 @@ cmd_wrap_status() {
         _print_wrap_status_for_project "$repo" "$ws" "$(project_label "$(basename "$repo")")"
     fi
 }
+
+# ----------------------------------------------------------------------------
+# Extension module loader
+#     Drop additional *.sh files into $OSS_MODULES_DIR (default: oss.d next
+#     to this script) to add or override subcommands. They can freely use
+#     any helper above and register new entries in the COMMANDS table below.
+# ----------------------------------------------------------------------------
+
+load_extension_modules() {
+    local dir="${OSS_MODULES_DIR:-$SCRIPT_DIR/oss.d}"
+    [[ -d "$dir" ]] || return 0
+    local f
+    for f in "$dir"/*.sh; do
+        [[ -e "$f" ]] || continue
+        log_debug "loading extension module: $f"
+        # shellcheck disable=SC1090
+        source "$f"
+    done
+}
+
+# ----------------------------------------------------------------------------
+# CLI parsing & dispatch
+# ----------------------------------------------------------------------------
+
+usage() {
+    cat <<EOF
+${SCRIPT_NAME} - manage a workspace of open-source git/Meson projects
+
+Usage:
+  ${SCRIPT_NAME} [global options] <command> <subcommand> [args...]
+
+Commands:
+  commit status                       Commits ahead of upstream (all projects if run in workspace root)
+  tag status                          Commits + time since latest tag (all projects if run in workspace root)
+  tag update <version>                Bump meson.build version, commit, tag, push main + tag
+  wrap gen <url|name> <tag>           Download a GitHub tag and generate a .wraps/<name>-<tag>.wrap file
+  wrap update <name> <tag>            Copy a wrap from the workspace into the current project + commit
+  wrap status                         Compare installed wraps against what's available in the workspace
+
+Global options:
+  -w, --workspace <dir>   Workspace directory (else \$OSS_WORKSPACE)
+      --no-color          Disable colored output
+      --color             Force colored output
+  -v, --verbose           Verbose/debug logging
+  -h, --help              Show this help
+
+Wrap gen options:
+  -p, --provide <name>    Override the [provide] name (default: project name)
+
+Environment:
+  OSS_WORKSPACE   Default workspace directory
+  OSS_GH_PREFIX   GitHub prefix for bare names in 'wrap gen' (e.g. https://github.com/myorg or myorg)
+EOF
+}
+
+main() {
+    local -a positional=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -w|--workspace)
+                [[ $# -ge 2 ]] || die "$1 requires an argument"
+                OSS_WORKSPACE_OPT="$2"
+                shift 2
+                ;;
+            --no-color)
+                COLOR_MODE="never"
+                shift
+                ;;
+            --color)
+                COLOR_MODE="always"
+                shift
+                ;;
+            -p|--provide)
+                [[ $# -ge 2 ]] || die "$1 requires an argument"
+                WRAP_PROVIDE_OPT="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                VERBOSE=1
+                shift
+                ;;
+            -h|--help)
+                _setup_colors
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                positional+=("$@")
+                break
+                ;;
+            -*)
+                die "unknown option: $1 (see --help)"
+                ;;
+            *)
+                positional+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    _setup_colors
+    load_extension_modules
+
+    local command="${positional[0]:-}"
+    local subcommand="${positional[1]:-}"
+
+    if [[ -z "$command" ]]; then
+        usage
+        exit 1
+    fi
+
+    case "$command" in
+        commit)
+            case "$subcommand" in
+                status) cmd_commit_status ;;
+                *) die "usage: $SCRIPT_NAME commit status" ;;
+            esac
+            ;;
+        tag)
+            case "$subcommand" in
+                status) cmd_tag_status ;;
+                update) cmd_tag_update "${positional[2]:-}" ;;
+                *) die "usage: $SCRIPT_NAME tag {status|update <version>}" ;;
+            esac
+            ;;
+        wrap)
+            case "$subcommand" in
+                gen)    cmd_wrap_gen "${positional[2]:-}" "${positional[3]:-}" ;;
+                update) cmd_wrap_update "${positional[2]:-}" "${positional[3]:-}" ;;
+                status) cmd_wrap_status ;;
+                *) die "usage: $SCRIPT_NAME wrap {gen <url|name> <tag>|update <name> <tag>|status}" ;;
+            esac
+            ;;
+        -h|--help|help)
+            usage
+            exit 0
+            ;;
+        *)
+            die "unknown command: $command (see --help)"
+            ;;
+    esac
+}
+
+main "$@"
