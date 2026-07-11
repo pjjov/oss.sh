@@ -261,3 +261,43 @@ cmd_tag_status() {
         _print_tag_status_for "$repo" "$(project_label "$(basename "$repo")")"
     fi
 }
+
+cmd_tag_update() {
+    local version="${1:-}"
+    [[ -n "$version" ]] || die "usage: $SCRIPT_NAME tag update <version>"
+    is_semver "$version" || die "version must look like v1, v1.0 or v1.0.0 (got: $version)"
+
+    require_cmds git sed
+
+    local repo
+    repo="$(git_root_from_cwd)" || die "not inside a git repository"
+
+    local branch
+    branch="$(git_current_branch "$repo")"
+    if [[ "$branch" != "main" ]]; then
+        die "must be on branch 'main' to run tag update (currently on '$branch')"
+    fi
+
+    local meson_build="$repo/meson.build"
+    [[ -f "$meson_build" ]] || die "meson.build not found at $meson_build"
+
+    local version_no_v
+    version_no_v="$(strip_v_prefix "$version")"
+
+    log_info "bumping version in $(basename "$meson_build") to $version_no_v"
+    if ! grep -Eq "version[[:space:]]*:[[:space:]]*'[^']*'" "$meson_build"; then
+        die "could not find a version : '...' field in $meson_build"
+    fi
+    sed -i -E "0,/version[[:space:]]*:[[:space:]]*'[^']*'/{s//version : '${version_no_v}'/}" "$meson_build" \
+        || die "failed to update version in $meson_build"
+
+    git -C "$repo" add meson.build || die "git add failed"
+    git -C "$repo" commit -m "chore: bump version to ${version}" || die "git commit failed"
+    git -C "$repo" tag "$version" || die "git tag failed (does it already exist?)"
+
+    log_info "pushing main and tag $version"
+    git -C "$repo" push origin main || die "failed to push main"
+    git -C "$repo" push origin "$version" || die "failed to push tag $version"
+
+    log_success "tagged and pushed $version"
+}
