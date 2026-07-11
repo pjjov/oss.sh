@@ -301,3 +301,88 @@ cmd_tag_update() {
 
     log_success "tagged and pushed $version"
 }
+
+# ----------------------------------------------------------------------------
+# Command: wrap gen / wrap update / wrap status
+# ----------------------------------------------------------------------------
+
+# Resolve a "url or name" target into REPO_URL and PROJECT_NAME (globals set
+# by this function, simplest way to return two values from bash).
+_wrap_resolve_target() {
+    local target="$1"
+    REPO_URL=""
+    PROJECT_NAME=""
+
+    if [[ "$target" =~ ^https?://github\.com/([^/]+)/([^/]+?)(\.git)?/?$ ]]; then
+        local owner="${BASH_REMATCH[1]}"
+        local repo="${BASH_REMATCH[2]}"
+        REPO_URL="https://github.com/${owner}/${repo}"
+        PROJECT_NAME="$repo"
+    elif [[ "$target" =~ ^git@github\.com:([^/]+)/([^/]+?)(\.git)?$ ]]; then
+        local owner="${BASH_REMATCH[1]}"
+        local repo="${BASH_REMATCH[2]}"
+        REPO_URL="https://github.com/${owner}/${repo}"
+        PROJECT_NAME="$repo"
+    else
+        # bare project name -> use OSS_GH_PREFIX
+        [[ -n "${OSS_GH_PREFIX:-}" ]] || die "OSS_GH_PREFIX is not set; needed to resolve bare name '$target'"
+        local prefix="${OSS_GH_PREFIX%/}"
+        if [[ "$prefix" != http*://* ]]; then
+            prefix="https://github.com/${prefix}"
+        fi
+        REPO_URL="${prefix}/${target}"
+        PROJECT_NAME="$target"
+    fi
+}
+
+cmd_wrap_gen() {
+    local target="${1:-}"
+    local tag="${2:-}"
+    [[ -n "$target" && -n "$tag" ]] || die "usage: $SCRIPT_NAME wrap gen <url|name> <tag> [-p/--provide <name>]"
+    is_semver "$tag" || die "tag must look like v1, v1.0 or v1.0.0 (got: $tag)"
+
+    require_cmds curl sha256sum mktemp
+
+    local ws
+    ws="$(resolve_workspace)" || exit 1
+    local wdir
+    wdir="$(wraps_dir "$ws")"
+    mkdir -p "$wdir"
+
+    _wrap_resolve_target "$target"
+    local repo_url="$REPO_URL"
+    local project="$PROJECT_NAME"
+    local provide_name="${WRAP_PROVIDE_OPT:-$project}"
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap '[[ -n "${tmpdir:-}" ]] && rm -rf "$tmpdir"' RETURN
+
+    local archive_url="${repo_url}/archive/refs/tags/${tag}.tar.gz"
+    local archive_path="${tmpdir}/${project}-${tag}.tar.gz"
+
+    log_info "downloading ${archive_url}"
+    if ! curl -fsSL -o "$archive_path" "$archive_url"; then
+        die "failed to download $archive_url (check the tag/url and try again)"
+    fi
+
+    local hash
+    hash="$(sha256sum "$archive_path" | awk '{print $1}')"
+
+    local wrap_file="${wdir}/${project}-${tag}.wrap"
+    local directory="${project}-${tag}"
+    local filename="${project}-${tag}.tar.gz"
+
+    cat > "$wrap_file" <<EOF
+[wrap-file]
+directory = ${directory}
+source_url = ${archive_url}
+source_filename = ${filename}
+source_hash = ${hash}
+
+[provide]
+${provide_name} = ${provide_name}_dep
+EOF
+
+    log_success "wrote $wrap_file"
+}
