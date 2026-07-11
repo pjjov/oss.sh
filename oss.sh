@@ -65,3 +65,74 @@ die() {
     log_error "$*"
     exit 1
 }
+
+# ----------------------------------------------------------------------------
+# Generic utilities
+# ----------------------------------------------------------------------------
+
+require_cmds() {
+    local missing=()
+    for c in "$@"; do
+        command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "missing required command(s): ${missing[*]}"
+    fi
+}
+
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+# ----------------------------------------------------------------------------
+# Workspace helpers
+# ----------------------------------------------------------------------------
+
+
+# NOTE: used as `ws="$(resolve_workspace)" || exit 1` at call sites.
+# It must NOT call die() itself: die() calls exit, and exit inside a
+# command-substitution subshell only terminates the subshell, not the
+# calling script -- execution would continue with an empty workspace.
+# So errors are printed here and a non-zero status is returned instead,
+# and every caller checks that status explicitly.
+resolve_workspace() {
+    local ws="${OSS_WORKSPACE_OPT:-${OSS_WORKSPACE:-}}"
+    if [[ -z "$ws" ]]; then
+        log_error "workspace not set. Use -w/--workspace <dir> or export OSS_WORKSPACE."
+        return 1
+    fi
+    if [[ ! -d "$ws" ]]; then
+        log_error "workspace directory does not exist: $ws"
+        return 1
+    fi
+    (cd "$ws" && pwd)
+}
+
+wraps_dir() {
+    local ws="$1"
+    printf '%s/.wraps' "$ws"
+}
+
+# Is the given directory (default: cwd) the workspace root?
+in_workspace_root() {
+    local ws="$1"
+    local cwd
+    cwd="$(pwd)"
+    [[ "$cwd" == "$ws" ]]
+}
+
+# List project directories directly under the workspace (git repos, .wraps excluded)
+list_projects() {
+    local ws="$1"
+    local d name
+    for d in "$ws"/*/; do
+        [[ -d "$d" ]] || continue
+        name="$(basename "$d")"
+        [[ "$name" == ".wraps" ]] && continue
+        [[ -d "$d/.git" ]] || continue
+        printf '%s\n' "${d%/}"
+    done
+}
