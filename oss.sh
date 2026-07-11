@@ -188,3 +188,39 @@ strip_v_prefix() {
     local v="$1"
     printf '%s' "${v#v}"
 }
+
+# ----------------------------------------------------------------------------
+# Command: commit status
+# ----------------------------------------------------------------------------
+
+_print_commit_status_for() {
+    local repo="$1" label="$2"
+    local ahead
+    ahead="$(git_commits_ahead "$repo")"
+    if [[ "$ahead" == "no-upstream" || -z "$ahead" ]]; then
+        printf '  %s  %sno upstream configured%s\n' "$label" "$C_YELLOW" "$C_RESET"
+    elif [[ "$ahead" == "0" ]]; then
+        printf '  %s  %sup to date%s\n' "$label" "$C_GREEN" "$C_RESET"
+    else
+        printf '  %s  %s%s commit(s) ahead of upstream%s\n' "$label" "$C_YELLOW" "$ahead" "$C_RESET"
+    fi
+}
+
+cmd_commit_status() {
+    local ws
+    ws="$(resolve_workspace)" || exit 1
+
+    if in_workspace_root "$ws"; then
+        heading "Commit status for all projects in $ws"
+        local repo
+        while IFS= read -r repo; do
+            [[ -z "$repo" ]] && continue
+            _print_commit_status_for "$repo" "$(project_label "$(basename "$repo")")"
+        done < <(list_projects "$ws")
+    else
+        local repo
+        repo="$(git_root_from_cwd)" || die "not inside a git repository"
+        heading "Commit status for $(basename "$repo")"
+        _print_commit_status_for "$repo" "$(project_label "$(basename "$repo")")"
+    fi
+}
