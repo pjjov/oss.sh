@@ -424,3 +424,84 @@ cmd_wrap_update() {
     git -C "$repo" commit -m "build: update ${name} to ${tag}" || die "git commit failed"
     log_success "committed update of ${name} to ${tag}"
 }
+
+# Extract a trailing version token (v1, v1.0, v1.0.0) from a wrap field value
+_extract_version_token() {
+    local s="$1"
+    if [[ "$s" =~ (v[0-9]+(\.[0-9]+){0,2})[^0-9.]*$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    fi
+}
+
+_wrap_current_version() {
+    local wrap_file="$1"
+    local val
+    val="$(grep -E '^(directory|source_filename)[[:space:]]*=' "$wrap_file" | head -n1 | cut -d= -f2-)"
+    val="$(trim "$val")"
+    _extract_version_token "$val"
+}
+
+_wrap_latest_available() {
+    local ws="$1" name="$2"
+    local wdir best=""
+    wdir="$(wraps_dir "$ws")"
+    [[ -d "$wdir" ]] || return 0
+    local f base tag
+    for f in "$wdir/${name}-"*.wrap; do
+        [[ -e "$f" ]] || continue
+        base="$(basename "$f" .wrap)"
+        tag="${base#${name}-}"
+        is_semver "$tag" || continue
+        if [[ -z "$best" ]] || [[ "$(printf '%s\n%s\n' "$best" "$tag" | sort -V | tail -n1)" == "$tag" ]]; then
+            best="$tag"
+        fi
+    done
+    printf '%s' "$best"
+}
+
+_print_wrap_status_for_project() {
+    local repo="$1" ws="$2" label="$3"
+    local subdir="$repo/subprojects"
+    if [[ ! -d "$subdir" ]] || ! compgen -G "$subdir/*.wrap" >/dev/null; then
+        printf '  %s  %sno wrap files%s\n' "$label" "$C_DIM" "$C_RESET"
+        return
+    fi
+
+    printf '  %s\n' "$label"
+    local f name current latest
+    for f in "$subdir"/*.wrap; do
+        [[ -e "$f" ]] || continue
+        name="$(basename "$f" .wrap)"
+        current="$(_wrap_current_version "$f")"
+        latest="$(_wrap_latest_available "$ws" "$name")"
+
+        if [[ -z "$latest" ]]; then
+            printf '    %-20s current=%s  %sno wraps found in workspace%s\n' "$name" "${current:-unknown}" "$C_DIM" "$C_RESET"
+        elif [[ -z "$current" ]]; then
+            printf '    %-20s %scould not detect current version%s (latest available: %s)\n' "$name" "$C_YELLOW" "$C_RESET" "$latest"
+        elif [[ "$current" == "$latest" ]]; then
+            printf '    %-20s %sup to date (%s)%s\n' "$name" "$C_GREEN" "$current" "$C_RESET"
+        else
+            printf '    %-20s %s%s -> %s update available%s\n' "$name" "$C_YELLOW" "$current" "$latest" "$C_RESET"
+        fi
+    done
+}
+
+cmd_wrap_status() {
+    local ws
+    ws="$(resolve_workspace)" || exit 1
+
+    if in_workspace_root "$ws"; then
+        heading "Wrap status for all projects in $ws"
+        local repo
+        while IFS= read -r repo; do
+            [[ -z "$repo" ]] && continue
+            _print_wrap_status_for_project "$repo" "$ws" "$(project_label "$(basename "$repo")")"
+        done < <(list_projects "$ws")
+    else
+        local repo
+        repo="$(git_root_from_cwd)" || die "not inside a git repository"
+        heading "Wrap status for $(basename "$repo")"
+        _print_wrap_status_for_project "$repo" "$ws" "$(project_label "$(basename "$repo")")"
+    fi
+}
