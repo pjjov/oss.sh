@@ -370,7 +370,7 @@ cmd_wrap_gen() {
     hash="$(sha256sum "$archive_path" | awk '{print $1}')"
 
     local wrap_file="${wdir}/${project}-${tag}.wrap"
-    local directory="${project}-${tag}"
+    local directory="${project}-${tag#[vV]}"
     local filename="${project}-${tag}.tar.gz"
 
     cat > "$wrap_file" <<EOF
@@ -381,7 +381,7 @@ source_filename = ${filename}
 source_hash = ${hash}
 
 [provide]
-${provide_name} = ${provide_name}_dep
+dependency_names = ${provide_name}
 EOF
 
     log_success "wrote $wrap_file"
@@ -428,7 +428,7 @@ cmd_wrap_update() {
 # Extract a trailing version token (v1, v1.0, v1.0.0) from a wrap field value
 _extract_version_token() {
     local s="$1"
-    if [[ "$s" =~ (v[0-9]+(\.[0-9]+){0,2})[^0-9.]*$ ]]; then
+    if [[ "$s" =~ (v?[0-9]+(\.[0-9]+){0,2})[^0-9.]*$ ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
     fi
 }
@@ -436,7 +436,7 @@ _extract_version_token() {
 _wrap_current_version() {
     local wrap_file="$1"
     local val
-    val="$(grep -E '^(directory|source_filename)[[:space:]]*=' "$wrap_file" | head -n1 | cut -d= -f2-)"
+    val="$(grep -E '^[[:space:]]*(directory|source_filename)[[:space:]]*=' "$wrap_file" | head -n1 | cut -d= -f2-)"
     val="$(trim "$val")"
     _extract_version_token "$val"
 }
